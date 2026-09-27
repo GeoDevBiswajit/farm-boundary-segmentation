@@ -1,592 +1,406 @@
 # Farm Boundary Segmentation
 
-A modular, production-oriented deep learning pipeline for extracting farm boundaries from high-resolution satellite imagery using semantic segmentation and geospatial post-processing.
+A geospatial deep-learning pipeline for **automated farm boundary delineation from high-resolution satellite imagery** using **U-Net semantic segmentation**.
+
+The project covers the complete model-development workflow, from geospatial raster preparation and image tiling to model training, custom loss functions, evaluation metrics, checkpointing, and TensorBoard experiment tracking.
+
+---
 
 ## Overview
 
-Accurate farm boundary extraction is an important component of satellite-based agricultural intelligence. Manually digitizing field boundaries over large geographic areas is time-consuming and difficult to scale.
+Farm boundary delineation is an important step in building field-level agricultural datasets. Manually digitizing field boundaries is time-consuming and difficult to scale.
 
-This project develops an end-to-end workflow for automatically extracting agricultural field boundaries from high-resolution satellite imagery.
+This project uses semantic segmentation to classify pixels into:
 
-The pipeline is designed with a **modular architecture**, separating data preparation, model inference, post-processing, and geospatial vectorization. This makes individual components easier to test, replace, and integrate into a larger production system.
+* **Farm / field**
+* **Background**
 
-### Key capabilities
+The resulting segmentation mask can then be used as the foundation for extracting individual agricultural field boundaries.
 
-* High-resolution satellite image preprocessing
-* Image tiling for deep-learning inference
-* Semantic segmentation of agricultural fields
-* Model inference on large satellite scenes
-* Overlapping tile prediction and reconstruction
-* Probability-based mask generation
-* Morphological and spatial post-processing
-* Connected-component / polygon extraction
-* Polygon cleaning and filtering
-* Raster-to-vector conversion
-* Geospatial output generation
-* Modular configuration for reproducible processing
-
----
-
-## Pipeline Architecture
+### Workflow
 
 ```text
-                    Satellite Imagery
-                           │
-                           ▼
-                  ┌──────────────────┐
-                  │ Data Preparation │
-                  │                  │
-                  │ • Read imagery   │
-                  │ • CRS handling   │
-                  │ • Normalization  │
-                  └────────┬─────────┘
-                           │
-                           ▼
-                  ┌──────────────────┐
-                  │ Image Tiling     │
-                  │                  │
-                  │ • Fixed windows  │
-                  │ • Overlap        │
-                  │ • Patch creation │
-                  └────────┬─────────┘
-                           │
-                           ▼
-                  ┌──────────────────┐
-                  │ Deep Learning    │
-                  │ Segmentation     │
-                  │                  │
-                  │ • Model loading  │
-                  │ • Batch infer.   │
-                  │ • Probability   │
-                  └────────┬─────────┘
-                           │
-                           ▼
-                  ┌──────────────────┐
-                  │ Prediction       │
-                  │ Reconstruction   │
-                  │                  │
-                  │ • Merge patches  │
-                  │ • Thresholding   │
-                  │ • Mask creation  │
-                  └────────┬─────────┘
-                           │
-                           ▼
-                  ┌──────────────────┐
-                  │ Post Processing  │
-                  │                  │
-                  │ • Noise removal  │
-                  │ • Morphology     │
-                  │ • Object filtering│
-                  └────────┬─────────┘
-                           │
-                           ▼
-                  ┌──────────────────┐
-                  │ Vectorization   │
-                  │                  │
-                  │ • Polygonize    │
-                  │ • Geometry fix  │
-                  │ • Area filtering│
-                  └────────┬─────────┘
-                           │
-                           ▼
-                  ┌──────────────────┐
-                  │ Farm Boundaries  │
-                  │                  │
-                  │ GeoJSON / GPKG   │
-                  │ Shapefile / etc. │
-                  └──────────────────┘
+Source Satellite Imagery
+          │
+          ▼
+   Raster Preparation
+          │
+          ▼
+   Mask Rasterization
+          │
+          ▼
+     Image Tiling
+          │
+          ▼
+ Train / Validation / Test Split
+          │
+          ▼
+    tf.data Pipeline
+          │
+          ▼
+       U-Net
+          │
+          ▼
+   Pixel-wise Prediction
+          │
+          ▼
+ Segmentation Evaluation
+          │
+          ▼
+ Model Checkpoint + Logs
 ```
 
 ---
 
-## Why a Modular Architecture?
+## Key Features
 
-A production geospatial ML workflow should not depend on a single notebook containing the entire processing chain.
-
-Instead, the workflow is divided into independent components with clear responsibilities.
-
-For example:
-
-```text
-Input
-  │
-  ├── preprocessing
-  │
-  ├── tiling
-  │
-  ├── inference
-  │
-  ├── reconstruction
-  │
-  ├── post-processing
-  │
-  └── vectorization
-       │
-       ▼
-     Output
-```
-
-This approach makes it possible to:
-
-* replace the segmentation model without rewriting the preprocessing pipeline
-* change the tiling strategy independently
-* tune post-processing parameters without retraining the model
-* process different satellite datasets
-* test individual modules independently
-* run inference over many AOIs
-* integrate the pipeline into an automated production workflow
+* Geospatial raster and vector data preparation
+* Rasterization of field boundary masks
+* Image and mask tiling
+* Train/validation/test dataset preparation
+* TensorFlow `tf.data` input pipeline
+* U-Net semantic segmentation architecture
+* Dice loss
+* Weighted Binary Cross-Entropy + Dice loss
+* Streaming Dice metric
+* Model checkpointing
+* CSV training history
+* TensorBoard logging
+* Config-driven training parameters
 
 ---
 
 ## Project Structure
 
 ```text
-farm-boundary-segmentation/
-│
-├── configs/
-│   └── config.yaml
+field_boundary_delineation/
 │
 ├── data/
-│   ├── raw/
-│   ├── processed/
-│   └── samples/
+│   ├── raster/
+│   │   ├── images/
+│   │   ├── mask/
+│   │   └── tiles/
+│   │       ├── images/
+│   │       └── masks/
+│   │
+│   ├── train/
+│   │   ├── images/
+│   │   └── masks/
+│   │
+│   ├── val/
+│   │   ├── images/
+│   │   └── masks/
+│   │
+│   ├── test/
+│   │   ├── images/
+│   │   └── masks/
+│   │
+│   └── vector/
 │
-├── models/
-│   └── README.md
+├── output/
+│   ├── model/
+│   └── log/
+│       ├── train.csv
+│       └── train/
 │
 ├── src/
-│   ├── preprocessing/
-│   │   ├── reader.py
-│   │   ├── normalization.py
-│   │   └── tiling.py
-│   │
-│   ├── inference/
-│   │   ├── model.py
-│   │   ├── predictor.py
-│   │   └── batch_inference.py
-│   │
-│   ├── postprocessing/
-│   │   ├── mask_processing.py
-│   │   ├── morphology.py
-│   │   └── filtering.py
-│   │
-│   ├── vectorization/
-│   │   ├── polygonize.py
-│   │   └── geometry.py
-│   │
-│   └── utils/
-│       ├── raster.py
-│       ├── logging.py
-│       └── config.py
+│   ├── config.py
+│   ├── data_preparation.ipynb
+│   ├── datasets.py
+│   ├── model.py
+│   ├── losses.py
+│   ├── metrices.py
+│   ├── callback.py
+│   └── train.py
 │
-├── scripts/
-│   ├── run_inference.py
-│   └── generate_vectors.py
-│
-├── notebooks/
-│   └── exploration.ipynb
-│
-├── tests/
-│   ├── test_preprocessing.py
-│   ├── test_inference.py
-│   └── test_vectorization.py
-│
-├── .gitignore
-├── requirements.txt
+├── requirments.txt
 ├── README.md
-└── LICENSE
+├── LICENSE
+└── model_architecture.png
 ```
 
-> The exact directory names can be adapted to the implementation in this repository. The important principle is that **model inference, geospatial processing, and post-processing remain separated modules**.
+---
+
+## Pipeline Components
+
+### 1. Geospatial Data Preparation
+
+`data_preparation.ipynb` handles the initial preparation of the training data.
+
+The workflow includes:
+
+* Reading geospatial raster and vector data
+* Preparing source imagery
+* Rasterizing farm boundary polygons into segmentation masks
+* Generating image/mask tiles
+* Exploring the prepared dataset
+* Creating training, validation, and test datasets
+
+The important aspect is that the **image and corresponding mask remain spatially aligned** throughout the preparation process.
 
 ---
 
-## Methodology
+### 2. Dataset Pipeline
 
-### 1. Image Preparation
+`datasets.py` implements the TensorFlow input pipeline.
 
-Satellite imagery is first prepared for model inference.
-
-Typical operations include:
-
-* raster reading
-* spatial reference handling
-* band selection
-* data type conversion
-* normalization
-* nodata handling
-* spatial cropping
-
-The preprocessing stage produces model-ready image arrays while preserving the spatial metadata required for subsequent geospatial processing.
-
----
-
-### 2. Tiling
-
-Large satellite scenes cannot always be passed directly to a deep-learning model because of GPU memory constraints.
-
-The imagery is therefore divided into smaller patches.
+The dataset loader:
 
 ```text
-Large Satellite Scene
-┌───────────────────────────────┐
-│ ┌─────┐ ┌─────┐ ┌─────┐      │
-│ │tile │ │tile │ │tile │      │
-│ └─────┘ └─────┘ └─────┘      │
-│ ┌─────┐ ┌─────┐ ┌─────┐      │
-│ │tile │ │tile │ │tile │      │
-│ └─────┘ └─────┘ └─────┘      │
-└───────────────────────────────┘
+GeoTIFF
+   ↓
+Image / Mask Reading
+   ↓
+Preprocessing
+   ↓
+Tensor Conversion
+   ↓
+tf.data.Dataset
+   ↓
+Batching / Training
 ```
 
-Overlapping tiles can be used to reduce boundary artifacts between neighboring patches.
-
-Each tile retains its spatial position so that predictions can later be reconstructed in the original geographic coordinate system.
+Using `tf.data` allows the training pipeline to efficiently load and batch large numbers of image patches.
 
 ---
 
-### 3. Semantic Segmentation
+### 3. U-Net Model
 
-The prepared image patches are passed through a semantic segmentation model.
-
-The model predicts the probability of each pixel belonging to the target agricultural-field class.
+`model.py` contains the U-Net segmentation architecture.
 
 Conceptually:
 
 ```text
-Image Patch
-     │
-     ▼
-Segmentation Model
-     │
-     ▼
-Pixel-wise Probability
-     │
-     ▼
-Binary Segmentation Mask
+                 Input Image
+                      │
+                      ▼
+              Encoder / Downsampling
+                      │
+                      ▼
+                   Bottleneck
+                      │
+                      ▼
+              Decoder / Upsampling
+                      │
+               Skip Connections
+                      │
+                      ▼
+             Pixel-wise Prediction
 ```
 
-The model architecture is intentionally isolated from the rest of the pipeline so that different segmentation architectures can be evaluated without changing the surrounding geospatial workflow.
+Skip connections allow spatial information from the encoder to be passed to the decoder, which is particularly important for delineating detailed field boundaries.
 
----
-
-### 4. Prediction Reconstruction
-
-Predictions from individual tiles are reconstructed into a continuous scene.
-
-For overlapping tiles, predictions can be combined before thresholding to reduce discontinuities at tile boundaries.
-
-The reconstructed output maintains the spatial relationship with the original satellite image.
-
----
-
-### 5. Post-processing
-
-Raw segmentation predictions may contain:
-
-* small isolated objects
-* holes
-* fragmented boundaries
-* narrow artifacts
-* unwanted regions
-
-Spatial post-processing is therefore applied before vectorization.
-
-Depending on the use case, this stage may include:
-
-* thresholding
-* morphological operations
-* connected-component analysis
-* minimum-area filtering
-* hole removal
-* geometry simplification
-
-Keeping this stage independent from model inference makes it possible to tune spatial rules without retraining the model.
-
----
-
-### 6. Raster-to-Vector Conversion
-
-The final segmentation mask is converted into vector geometries.
+The model architecture is visualized in:
 
 ```text
-Segmentation Mask
-       │
-       ▼
-    Polygonize
-       │
-       ▼
-Geometry Validation
-       │
-       ▼
-Spatial Filtering
-       │
-       ▼
-Farm Boundary Polygons
+model_architecture.png
 ```
-
-The resulting polygons can be exported as common geospatial formats such as:
-
-* GeoJSON
-* GeoPackage
-* Shapefile
-
-The output retains the coordinate reference system of the source data.
 
 ---
 
-## Production-Oriented Design
+### 4. Custom Loss Functions
 
-The project follows several principles commonly required when moving a research workflow toward production.
+`losses.py` contains segmentation-specific loss functions.
 
-### Separation of concerns
+The project includes:
 
-Each component performs a specific task.
+* **Dice Loss**
+* **Weighted Binary Cross-Entropy + Dice Loss**
+
+Dice-based objectives are useful for segmentation problems where foreground pixels may represent a relatively small portion of the complete image.
+
+A combined loss can be expressed conceptually as:
 
 ```text
-Data I/O
-   ↓
-Preprocessing
-   ↓
-Inference
-   ↓
-Prediction reconstruction
-   ↓
-Post-processing
-   ↓
-Vectorization
-   ↓
-Export
+Total Loss
+    =
+Weighted BCE
+    +
+Dice Loss
 ```
 
-This prevents model-specific logic from becoming tightly coupled with geospatial processing.
+This combines pixel-level classification with overlap-based segmentation optimization.
 
-### Configuration-driven execution
+---
 
-Processing parameters can be maintained separately from the implementation.
+### 5. Evaluation Metric
 
-Example:
+`metrices.py` contains the streaming Dice metric used during model training/evaluation.
 
-```yaml
-input:
-  image: data/input/image.tif
-
-model:
-  checkpoint: models/model.pth
-
-inference:
-  tile_size: 512
-  overlap: 64
-  batch_size: 8
-
-postprocessing:
-  threshold: 0.5
-  min_area: 100
-```
-
-This allows different AOIs, models, and inference configurations to be processed without modifying the source code.
-
-### Reproducibility
-
-The pipeline separates:
-
-* configuration
-* model weights
-* source code
-* input data
-* generated outputs
-
-Large satellite datasets and model checkpoints should not be committed directly to Git. Instead, they can be referenced through external storage or model repositories.
-
-### Scalability
-
-The same processing logic can be applied to:
+Dice coefficient measures the overlap between the predicted segmentation and the reference mask:
 
 ```text
-Single Farm
-     ↓
-Multiple Farms
-     ↓
-AOI
-     ↓
-Satellite Scene
-     ↓
-Large Geographic Region
+Dice = 2 × |Prediction ∩ Ground Truth|
+       ---------------------------------
+       |Prediction| + |Ground Truth|
 ```
 
-Batch processing can therefore be implemented without changing the core segmentation logic.
+A higher Dice value indicates greater spatial overlap between the predicted and reference field regions.
 
 ---
 
-## Geospatial Considerations
+### 6. Training & Experiment Tracking
 
-Unlike a conventional computer-vision segmentation project, this workflow treats the imagery as geospatial data.
+`train.py` acts as the main training entry point.
 
-Important considerations include:
+`callback.py` handles training-related callbacks such as:
 
-* CRS preservation
-* affine transforms
-* pixel-to-coordinate conversion
-* raster dimensions
-* spatial resolution
-* nodata handling
-* geometry validity
-* polygon area
-* spatial filtering
+* Model checkpointing
+* CSV logging
+* TensorBoard logging
+* Training controls
 
-This allows the final segmentation results to be used directly in downstream GIS and agricultural applications.
-
----
-
-## Example Workflow
-
-```python
-from pipeline import FarmBoundaryPipeline
-
-pipeline = FarmBoundaryPipeline(
-    config="configs/config.yaml"
-)
-
-result = pipeline.run(
-    input_raster="data/input/satellite.tif",
-    output="outputs/farm_boundaries.gpkg"
-)
-```
-
-A typical execution performs:
+Training outputs are stored under:
 
 ```text
-Satellite GeoTIFF
-      ↓
-Preprocessing
-      ↓
-Generate Tiles
-      ↓
-Model Inference
-      ↓
-Merge Predictions
-      ↓
-Post-processing
-      ↓
-Polygonization
-      ↓
-Farm Boundary GeoPackage
+output/
+├── model/
+└── log/
+    ├── train.csv
+    └── train/
 ```
 
----
-
-## Output
-
-The primary output is a vector dataset containing extracted farm/field boundaries.
-
-Example attributes may include:
-
-| Field      | Description                   |
-| ---------- | ----------------------------- |
-| `id`       | Unique polygon identifier     |
-| `area_m2`  | Polygon area in square meters |
-| `geometry` | Farm boundary geometry        |
-
-Additional confidence or model-derived attributes can be added depending on the downstream application.
+This provides a reproducible record of training progress and model checkpoints.
 
 ---
 
-## Applications
+## Configuration
 
-The extracted farm boundaries can serve as a foundation for:
+Training parameters and paths are centralized in:
 
-* agricultural field inventory
-* crop monitoring
-* satellite-based crop analytics
-* soil property estimation
-* irrigation advisory
-* crop health monitoring
-* agricultural insurance
-* farm-level credit assessment
-* precision agriculture
-* automated GIS database creation
+```text
+src/config.py
+```
+
+This keeps dataset locations, model parameters, and training settings separate from the core implementation.
+
+Typical configuration parameters include:
+
+```text
+Dataset paths
+Image dimensions
+Batch size
+Learning rate
+Number of epochs
+Model output path
+Logging paths
+```
+
+This makes experiments easier to reproduce and modify without changing the training logic.
+
+---
+
+## Why This Architecture?
+
+The project separates the major stages of a deep-learning workflow:
+
+```text
+Data Preparation
+       ↓
+Dataset Loading
+       ↓
+Model Architecture
+       ↓
+Loss Functions
+       ↓
+Metrics
+       ↓
+Callbacks
+       ↓
+Training
+```
+
+This modular structure makes it easier to:
+
+* modify the model independently
+* experiment with different loss functions
+* add or modify evaluation metrics
+* change dataset preparation
+* reproduce experiments
+* maintain the training pipeline
+* extend the project for future inference workflows
 
 ---
 
 ## Technology Stack
 
-**Programming**
+### Deep Learning
 
 * Python
+* TensorFlow / Keras
+* U-Net
+* Semantic Segmentation
 
-**Deep Learning**
-
-* PyTorch / TensorFlow
-* Semantic segmentation
-* GPU-based inference
-
-**Geospatial**
+### Geospatial
 
 * Rasterio
-* GDAL
 * GeoPandas
-* Shapely
-* NumPy
-
-**Data Formats**
-
+* GDAL
 * GeoTIFF
-* GeoJSON
 * GeoPackage
-* Shapefile
 
-**Development**
+### Data Processing
 
-* Git
-* YAML configuration
-* Modular Python package structure
+* NumPy
+* Pandas
+* TensorFlow `tf.data`
 
----
+### Experiment Tracking
 
-## Model & Data
-
-This repository is intended primarily to demonstrate the **engineering and geospatial processing workflow**.
-
-Large proprietary satellite datasets, production imagery, and trained model weights are not included in the repository.
-
-For reproducibility, users can provide their own compatible imagery and model checkpoint.
+* TensorBoard
+* CSV training logs
+* Keras model checkpoints
 
 ---
 
-## Limitations
+## Dataset
 
-Performance depends on factors such as:
+The project uses high-resolution satellite imagery and corresponding farm-boundary reference data.
 
-* spatial resolution of imagery
-* image quality
-* cloud and atmospheric conditions
-* field size and shape
-* landscape complexity
-* training-data distribution
-* model architecture
-* segmentation threshold
-* post-processing parameters
+The repository structure supports:
 
-The extracted polygons should therefore be validated against appropriate reference data before being used in operational applications.
+```text
+Image
+   +
+Ground Truth Boundary
+        ↓
+Rasterized Mask
+        ↓
+Image / Mask Tile
+        ↓
+Training Dataset
+```
+
+Large satellite datasets and other data that cannot be redistributed are not included in the repository.
 
 ---
 
-## Future Improvements
+## Future Extensions
 
-Potential extensions include:
+The current repository focuses primarily on the **training pipeline**.
 
-* automated dataset preparation
-* multi-class field segmentation
-* uncertainty estimation
-* confidence-based polygon filtering
-* distributed batch inference
-* GPU/CPU resource optimization
-* automated model evaluation
-* experiment tracking
-* containerized deployment
-* REST API integration
-* cloud-based inference
-* STAC-based satellite data ingestion
+Possible extensions include:
+
+* Automated inference pipeline
+* Large-scene tiled inference
+* Overlapping tile prediction
+* Prediction reconstruction
+* Polygonization of segmentation masks
+* Farm polygon geometry cleaning
+* Quantitative test-set evaluation
+* Model comparison
+* Data augmentation
+* Experiment tracking
+* Batch inference over multiple AOIs
+* Deployment as a geospatial inference service
+
+---
+
+## License
+
+This project is released under the **MIT License**.
+
+See [`LICENSE`](LICENSE) for details.
 
 ---
 
@@ -596,17 +410,4 @@ Potential extensions include:
 
 Remote Sensing Engineer | Geospatial AI | Satellite Image Analysis
 
-Interests include:
-
-* Remote Sensing
-* Geospatial AI
-* Deep Learning
-* Agricultural Intelligence
-* Satellite Image Processing
-* Spatial Data Science
-
----
-
-## License
-
-Add an appropriate license based on the ownership and distribution rights of the code and datasets.
+**Focus:** Remote Sensing · Geospatial Deep Learning · Agricultural Intelligence · Spatial Data Science

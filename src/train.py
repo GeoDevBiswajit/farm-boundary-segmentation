@@ -2,7 +2,7 @@ from pathlib import Path
 from datasets import build_dataset
 from config import *
 from losses import BCEDiceLoss
-from metrices import DiceMetric
+from metrics import DiceMetric
 from model import build_unet
 from keras.optimizers import Adam
 from callback import create_callback
