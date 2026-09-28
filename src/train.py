@@ -1,5 +1,5 @@
 from pathlib import Path
-from datasets import build_dataset
+from data import build_dataset
 from config import *
 from losses import BCEDiceLoss
 from metrics import DiceMetric
